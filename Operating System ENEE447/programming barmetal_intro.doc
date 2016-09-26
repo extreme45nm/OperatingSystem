@@ -1,0 +1,103 @@
+Programming baremetal note
+
+==================================================================
+
+PURPOSE : foundation for baremetal programming
+
+Baremetal Programming = talking to the hardware directly
+
+Tools: GNU ARM cross compiler toolchain.
+
+
+
+FOR THE FIRST THING, we have to learn how does our computer BOOT.
+
+
+Raspi contains 2 primary processor.
+	GPU, a processor that process graphics. It's a fully capable general purpose processor with floating point
+	GPU boot first, it reads from the SD card, reads the file kernel.img then load this .img in RAM.
+	Then GPU controls the arm boot.
+
+	so where does the GPU place the ARM code ?????????? What address ????
+
+	That's part of the problem. 
+	From user's perspective, the firmware available at the first time is placing kernel.img in memory such that the first instruction it executed that we had control over was at address 0x00000000
+
+	Understand that the purpose for the Raspi is To run Linux and at least on ARM. The Linux kernel ( the kernel image ) is typically loaded at ARM address 0x000080000.
+	So those early ( to us ), kernel.img files had 0x8000 bytes of padding.
+	Later this was changed to a typical kernel.img that instead of being loaded at address 0x00000000 was loaded at 0x00008000
+
+
+	So the typical setup is the GPU copies the kernel.img content to address 0x00008000 in the ARM ADDRESS SPACE, then it places code at address 0x00000000 which does a little bit of prep then branches to the kernel.img code at offset 0x00008000.
+	Since kernel.img is out entry point, it's the ARM boot code that we can control, we have to build out program based on where the bytes in this file are placed and how it's used.
+	Thep presence of a file named "config.txt" and its contents can change the way the GPU boots the ARM, including moving where this file is placed and what address the ARM boots.
+	All of these things combined can put the contents of the file in memory where you didn't expect and your program may not run properly.
+
+
+	The prefrences of the author:
+		He use the most current GPU firmware files from the Raspi repo: bootcode.bin & start.elf.
+		He prefer NOT to use config.txt
+		He created his own kernel.img
+		0x00008000 is his ARM entry point.
+
+	Our first program is a file called "kernel.img". It's just a binary file that is copied to ARM memory space at address 0x00008000. 
+
+
+	Before main() in C was called and executed, there are some Assembly code that have been already executed.
+	This Assembly code is often called "BOOTSTRAP CODE".
+	This code is used to prepare memory and other conditions to make sure that C programs work as desired.
+		=================================================================================================
+			When you finish this tutorial go over to the bssdata directory, and read about
+			why I do it the way I do it and what other work you have to do to insure
+			those variables are pre-initialized before main() is called.  The short
+			answer is it involves toolchain specific things you have to do, and I
+			prefer to lean toward more portable including portable across toolchains
+			(minimizing effort to port) solutions.  So one thing is I try to make
+			my C code so that it does not use  "implementation defined" features of
+			the language (that do not port from one compiler to another, inline
+			assembly for example).  Second I try to keep the boot code and linker
+			scripts, etc as simple as possible with a little sacrifice on adding
+			some more code.  Linker scripts in particular are toolchain specific
+			and the the entry label and perhaps other boostrap items are also
+			toolchain specific.  You will see what all of that means in the bssdata
+			directory.
+		==================================================================================
+		==================================================================================
+		==================================================================================
+
+
+	Please note that he doesn't use main() as the entry point function in his code. 
+	In the bare metal programming, you always face 8KB or 16,32KB memory.
+	You cannot afford the toolchain sucking up too much memory with stuff you aren't using. 
+	Part of the bare metal programming is you being in control of everything, the code, peripheral, and the binary
+
+
+
+	========================================================
+
+	When compile a program in C, the C Compiler is called and it turns the C code into Assembly language in a text file, the the Assembler is called by the C Compiler and the Assembler assembles the Assembly language into an object file - maybe a binary file with most instruction on machine code
+	But it's not a complete machine code file because there are some FUNCTIONs or VARIABLEs in other objects that WON'T BE RESOLVED UNTIL LINK time.
+
+	for example, HelloWorld, when printf() need to print some output, it needs to link with a C library which makes SYSTEM CALLs and other stuff(maybe).
+	So the linker takes the object that came from our code and links that with these other items and creates a binary that is compatible with the operating system we are running.
+
+
+
+	==================================================================================
+
+
+	The next thing we have to know is there can be a difference between the entry point into our program and the first instruction in the program.
+		________________________________________________
+			If you think about it most programs we use a compiler for run on
+			operating systems.  The operating system loads the program from the
+			filesystem into memory and then performs a jump into that memory, it
+			can jump to any address.  It may or may not do that but it is at least
+			possible on a system that is already running.  But for booting a
+			processor we cannot change the processor to boot anywhere we want and on
+			the Raspberry Pi we cant or at least shouldnt try to change its habit
+			of executing the first instruction in the kernel.img file.  So we have
+			to make sure we control the whole linking process to insure that happens.
+		________________________________________________
+
+
+	

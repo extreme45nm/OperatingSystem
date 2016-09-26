@@ -1,0 +1,276 @@
+
+
+		Bare metal programming is as much about knowing and manipulating the compiler tools as it is about manipulating peripheral register
+
+		Bfore talk about peripherals, we must have code that runs on the hardware
+
+
+		The GNUlinker is looking for a label named _start to know where the entry point of the program is. 
+
+		The bare minimum bootstrap code for this processor would be to set the SP and to branch to our C Program. 
+		
+
+		tools: gcc-arm-linux-gnueabi, binutils-arm-linux-eabi
+
+
+		first create a assembly file 
+
+		then try to assemble it with gnueabi-as
+		then disassembly it with eabi-objdump -D 
+		
+
+
+		ELF format
+		That file is a mixture of the bits and bytes of you program that are wrapped by a file format that contains things like debugging information and other things
+
+		If the file only contains the machine code & data that makes up the program it would only need these 8 bytes:
+
+				e3 a0 d8 01
+				ea ff ff fe
+
+
+		but the file is larger. So the disassembler know from that the names of things like _start and notmain....
+		then hexdump it with hexdump, you will see the rest....
+
+
+		GNU tools supported many file formats. ELF is the default format for ARM based program and many others...
+		We can convert those into other formats using another tools of binutils tools
+		We have to use those tools for Raspi
+		PLEASE NOTICE that *.elf is binary itself, you must use other programs like obj-dump to extract info from it.
+
+
+
+			baremetal > arm-none-eabi-objcopy bootstrap.o -O ihex bootstrap.hex
+			baremetal > cat bootstrap.hex
+			:0800000001D8A0E3FEFFFFEAB6
+			:00000001FF
+
+
+		Next, is the objcopy 
+		It takes a option -O with some predefined name like ihex,srec.... clear
+
+
+
+		TASK: get the DEFINITION of INTEL HEX and S-RECORD.
+
+				very easily write a program that parses those
+				files and extracts things, maybe write your own disassembler for
+				educational purposes or write a bootloader or an instruction set
+				simulator or any place where you need to take a compiler/assembler/linker
+				generated program and read it for any reason
+
+		it is as easy to make an elf  parser as it is to make an ihex or srec parser
+
+
+
+
+		Next is C Programming.......
+
+
+		create notmain function:
+		
+				void notmain ( void )
+				{
+				}
+
+		Then disassembly it with 2 commands:
+
+				baremetal > arm-none-eabi-gcc -O2 -c notmain.c -o notmain.o
+				baremetal > arm-none-eabi-objdump -D notmain.o
+
+		Now, check the output:
+
+				notmain.o:     file format elf32-littlearm
+
+
+				Disassembly of section .text:
+
+				00000000 <notmain>:
+				   0:   e12fff1e    bx  lr
+
+		bx lr ???
+		bx là một lệnh trong tập lệnh của bxl ARM  = branch exchange
+		lr là link register
+		Khi gọi 1 hàm trong C, chúng ta sẽ muốn bộ xử lý nhảy đến vị trí của hàm, thực thi, sau đó lại nhảy về vị trí cũ rồi tiếp tục thực thi các đoạn code...
+		Tương đương với 
+		bx lr
+		là
+		mov pc, lr
+
+
+		Như vậy, đến thời điểm hiện tại, chúng ta có notmain.o và bootstrap.o là 2 object cần được link với nhau. 
+		Ở trên, chúng ta cũng nói rằng, chương trình sẽ bắt đầu ở địa chỉ 0x8000, vậy hãy thử link nào...
+
+				baremetal > arm-none-eabi-ld -Ttext 0x00008000 bootstrap.o notmain.o -o hello.elf
+				baremetal > arm-none-eabi-objdump -D hello.elf
+
+		Sau khi link, chúng ta disassem cái file *.elf vừa link.
+		Đây là chương trình bar metal đầu tiên cho Raspi mà chúng ta tự xây dựng.
+		Vấn đề là chúng ta không thể chạy nó. Lí do:
+			- WRONG INSTRUCTION.
+			- ELF is not a *.BIN file
+
+		Cách fix:
+			Khi chạy code từ assembly, ta cần sử dụng branch link để đặt một vài đoạn code sau lời gọi hàm notmain. 
+			Sau khi notmain() returns, chugns ta có thể đặt bộ xử lý vào vòng lặp vô hạn, đợi user tắt máy để thử chương trình khác.
+
+					.globl _start
+					_start:
+					    mov sp,#0x00010000
+					    bl notmain
+					hang: b hang
+
+		bl  =  branch & link
+		b gần giống với lệnh goto trong C.
+		bl thì giống với câu gọi hàm trong C. 
+		Sau khi sửa bootstrap.s, ta cần assemble lại nó và link với notmain.o
+
+					baremetal > arm-none-eabi-as bootstrap.s -o bootstrap.o
+					baremetal > arm-none-eabi-ld -Ttext 0x00008000 bootstrap.o notmain.o -o hello.elf
+
+		Tiếp đó, ta ghi thành file  *.img
+
+					baremetal > arm-none-eabi-objcopy hello.elf -O binary kernel.img
+
+		Ta có thể ghi file *.img này ra thẻ nhớ và chạy, thực ra thì file này có thực thi nhưng chúng ta ko nhìn được kết quả, nên .....
+
+		Một số điều đáng chú ý:
+
+			Khi disassembled bootstrap.o, địa chỉ lại là 0x0000 chứ không phải 0x8000. Bởi vì object file, theo đúng định nghĩa, thì chỉ là chương trình không hoàn chỉnh, vẫn cần đến linker trước khi chạy.
+			Và sau khi linker, chúng ta thấy chương trình bắt đầu từ vị trí 0x8000
+			
+			Một điều nữa, bạn có thấy là khái niêm section và section .text chưa được tác giả nhắc đến?
+
+
+		Trong thế giới của compiler và assembler, các phần của chương trình được chia ra thành các đề mục - category.
+		Đọc cuốn Programming Ground Up để tìm hiểu thêm về section....
+
+
+
+		nào, bây giờ hãy thử 1 vài ví dụ mới về section
+
+					unsigned int apple;
+					unsigned int orange=5;
+					const unsigned int pickle=9;
+
+					void notmain ( void )
+					{
+					    static unsigned int pear=7;
+					    unsigned int peach;
+					}
+
+		Biên dịch và objdump
+
+					arm-none-eabi-gcc -O2 -c notmain.c -o notmain.o
+					baremetal > arm-none-eabi-objdump -D notmain.o
+
+		Đọc phần dissaembly, ta thấy những biến được init trước sẽ nằm trong .data
+		Các biến hằng - const nằm trong .rodata
+		Vậy các biến chưa được init thì sao??? Các biến này không xuất hiện, do cơ chế Optimization
+		>> Hãy để ý rằng, tham số -O2 mà ta nạp vào lúc biên dịch bằng GCC tương đướng với việc đặt Optimization level = 2. 
+		Có 4 level của optimization, level 0 là không có optimization, level 3 không được khuyến khích do chưa được test hoàn chỉnh. Tác giả khuyên dùng level 2.
+
+			
+
+		Chương trình mẫu của tác giả không sử dụng biến "apple", "pear" hay "peach" nên bộ Compiler sẽ optimze và loại các biến này ra. 
+		Tuy các biến "orange" hay "pickle" không được sử dụng nhưng chúng ta đã define 2 biến này là biến toàn cục nên Compiler phải generate ra "một số thứ" cho 2 biến này nhằm phục vụ quá trình linking 2 biến này với các object khác nếu có.
+
+		Bây giờ hãy thử thay đổi giá trị của biến "apple" trong hàm notmain(), chúng ta sẽ thấy....
+
+
+		Sau khi biên dịch và linking rồi disassem, ta thấy "apple" đã xuất hiện trong .bss section
+
+		Đoạn này hơi khó hiểu:.;...
+
+					So our apple variable has appeared is in the .bss section.  Notice
+					on the linker command line I specified a few things the text segment
+					address and data and bss but not the rodata.  The linker again has
+					put the .text where we said and where we need it at 0x8000 we said
+					to put .data at 0x9000 and it is there and notice it has the value
+					5 from our orange variable.  .bss is where we said at 0xA000.  Since
+					we didnt specify a home for .rodata notice how the linker has just
+					tacked it onto the end of .text  the last thing in .text was a four
+					byte address at address 0x8020, so the next address after that is 0x8024
+					and that is where the .rodata variable pickle is placed and has
+					the value 9 that we pre-initialized.
+
+					I want to point something out here that is very important for general
+					bare metal programming.  What do we have above, something like 12 32
+					bit numbers which is 12*4 = 48 bytes.  So if I make this a true
+					binary (memory image) we should see 48 bytes right?  Well you would be
+					wrong:			
+
+					< tác giả tiến hành objcopy và hexdump file kernel >
+
+					We can see that the first thing in the file is our code that lives
+					at address 0x8000, understand that the file offset and the memory offset
+					are not the same.  What is important is that first thing in the file
+					ends up at 0x8000 and since it is our entry code we are good from that
+					perspective.  Now why isnt the file 48 bytes?  Because a binary file
+					when we define it as a memory image means that if we have a few things
+					at 0x8000 a few things at 0x9000 and a few things at 0xA000 in order
+					for those things to be in the right place in the file they need to be
+					spaced apart, the file has to have some filler to put the important
+					things at the right place.
+
+					If this is at 0x8000
+
+					    8000:   e3a0d801    mov sp, #65536  ; 0x10000
+
+					And this is at 0x9000
+
+					    9000:   00000005    andeq   r0, r0, r5
+
+					Then they are 0x1000 bytes apart.  The * in the hexdump output means
+					I am skipping a bunch of zeros, there is nothing you are missing. The
+					hexdump output verifies that these two items are 0x1000 byte apart.
+
+					00000000  01 d8 a0 e3
+
+					00001000  05 00 00 00
+
+
+		Nếu bạn duy trì bare metal programming, đôi khi bạn sẽ gặp những hệ thống có không gian bộ nhớ flash ở địa chỉ cao như 0x80000000 và phần bộ nhớ mà bạn đặt .data section thì lại ở vị trí thấp như 0x20000000.
+
+
+		Sau đó tác giả thử link các object ở 2 vị trí cách xa này:
+
+			baremetal > arm-none-eabi-ld -Ttext 0x8000 -Tdata 0x9000 -Tbss 0xA000 bootstrap.o notmain.o -o hello.elf
+			baremetal > ls -al hello.elf
+			-rwxr-xr-x 1 root root 38002 Sep 23 15:26 hello.elf
+			baremetal > arm-none-eabi-ld -Ttext 0x80000000 -Tdata 0x20000000 -Tbss 0xA000 bootstrap.o notmain.o -o hello.elf
+			baremetal > ls -al hello.elf
+			-rwxr-xr-x 1 root root 66710 Sep 23 15:27 hello.elf
+
+		Tác giả nhận thấy kích thước file tăng lên. Sau đó ông thử objcopy ra binary format thì nhận thấy khoảng cách giữa 2 lệnh là 0x60000000 bytes, tương đương 1.6 Gb, tuy nhiên trong 1.6Gb đó hầu hết là các số 0, không có dữ liệu nào đáng chú ý - zero filler.
+
+
+		Có 1 đoạn đáng chú ý:
+
+			 8020: 0000a000 andeq sl, r0, r0
+
+		Linker đã điền địa chỉ của biến "apple" trong .bss
+
+
+		Tiếp đó ta copy hello.elf vào kernel. và dung lượng của kernel là 4100 bytes.
+
+		0x8000 + 4100 = 0x8000 + 0x1004 = 0x9004 
+
+		0x9004 là số lượng các byte nhị phân nằm trong image. Đây cũng là một chỗ khó hiểu....
+
+			4100 bytes.  0x8000 + 4100 = 0x8000 + 0x1004 = 0x9004  the binary
+			only includes an image of memory from 0x8000 to 0x9003 the objcopy
+			to -O binary did not include bss it was chopped off.  Why? because
+			in part where we specified it and because in part the toolchain
+			expects that the .bss segment will be zeroed by the bootstrap code
+			and not waste space in the binary image for that data.
+
+		
+
+
+
+
+
+
+
+
